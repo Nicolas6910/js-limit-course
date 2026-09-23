@@ -14,9 +14,14 @@ Cycle de marche puis course d'un personnage 2D en canvas 2D, rig entierement pro
 Une image PNG detouree par segment, dans `assets/cutout/` : tete, cou, torse (veste), bassin, cuisse, tibia (jean),
 chaussure (coupee en deux au pli metatarsien pour le deroule), bras, avant-bras, main, queue de cheval, et pour le visage
 oeil ouvert, paupiere fermee, bouche fermee / entrouverte / grande ouverte (clignement et halètement pendant la recuperation).
-Chaque piece est rigide : elle pivote sur son articulation (constantes `CUT` dans `index.html` : pivots proximal/distal en pixels,
-longueur cible en metres), ses extremites sont arrondies en capsule pour recouvrir l'articulation, et les membres arriere
-sont assombris et dessines derriere le corps.
+Articulations invisibles : cuisse+tibia et bras+avant-bras ne sont plus deux pieces mais une seule bande continue
+par membre (`leg.png`, `arm.png`, construites par `tools/joints.py` a partir des pieces d origine : contour sombre retire,
+teinte du segment distal recalee sur le proximal, largeurs raccordees au genou/coude, fondu sur la jointure).
+Au rendu, la bande est pliee autour du genou/coude par un skinning 2D (tranches fines tournant d un angle interpole
+autour du pivot) : le tissu se courbe au lieu de se casser. Chaque membre est compose hors ecran puis entoure d un
+seul contour (dilatation de la silhouette de l union), efface pres de l epaule et de la hanche ; la calotte de hanche/epaule
+est fondue en alpha et rognee a la silhouette interieure du bassin/torse pour ne jamais deborder. Ordre : bras et
+jambe du fond (assombris), bassin, jambe avant, cou, veste, tete, bras avant.
 
 Images generees avec Agnes (`agnes-image-2.5-flash`), une piece par prompt avec un prefixe de style commun
 (« paper craft cut-out puppet part … solid chroma green background ») et des couleurs fixees

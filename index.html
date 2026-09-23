@@ -21,7 +21,7 @@ button.on{border-color:#34e3c3;color:#6ff7dc}
 </head>
 <body>
 <canvas id="c"></canvas>
-<div class="hud"><h1>Marche → Course</h1><div class="sub">Rig 2D procédural · habillage cut-out (une image par segment) · IK deux os · pieds ancrés · S = squelette</div><div class="phase" id="ph">Repos</div></div>
+<div class="hud"><h1>Marche → Course</h1><div class="sub">Rig 2D procédural · habillage cut-out sans jointure (membres continus pliés) · IK deux os · pieds ancrés · S = squelette</div><div class="phase" id="ph">Repos</div></div>
 <div class="ctrl"><button id="bSk" title="Touche S">Squelette</button><button id="bRe">↻ Rejouer</button></div>
 <div class="bar"><i id="pb"></i></div>
 <script>
@@ -502,10 +502,10 @@ function drawSkeleton(s,P){
 // Pivots en pixels image. Pour les membres : p0 = articulation proximale, p1 = distale (axe image vertical).
 // L = longueur rig (m), wk = facteur de largeur constant (calibre une fois, jamais anime).
 const CUT={
-  thigh:{p0:[43,43],p1:[43,268],L:L1,wk:1},
-  shin:{p0:[34.5,35.5],p1:[34,275],L:L2,wk:1},
-  uarm:{p0:[46,43],p1:[45,267],L:UA,wk:1},
-  farm:{p0:[44,44],p1:[41.5,274.5],L:FA,wk:1},
+  // membres continus (cuisse+tibia, bras+avant-bras fusionnes en une bande droite, sans contour, teinte raccordee) :
+  // s = px/m, cx = axe, A/J/B = lignes des pivots proximal / central / distal, rA/rJ = rayons, hw = demi-zone de pli (px)
+  leg:{s:500,cx:48.5,A:47.96,J:277.96,B:500.46,rA:42.4,rJ:31.1,hw:34,ink:'rgb(16,20,31)'},
+  arm:{s:760,cx:51,A:46.31,J:266.71,B:471.91,rA:40.8,rJ:34.4,hw:40,ink:'rgb(62,21,9)'},
   neck:{p0:[39.5,39.5],p1:[40,121],L:0.12,wk:0.75},
   shoe:{sole:173,heel:2,mpp:0.00092},                // ligne de semelle et talon (px), metres/pixel
   hand:{wrist:[14,94],mpp:0.0007},
@@ -515,13 +515,22 @@ const CUT={
   pony:{tie:[18,22],tip:[92,250],mpp:0.00112},
   eye:{mpp:0.00030},mouth:{mpp:0.00032}
 };
-const CUT_FILES=['thigh','shin','uarm','farm','neck','shoe','hand','torso','pelvis','head','pony','eye','eyec','mouthc','moutho','moutho2'];
-const IMG={},IMG_D={};let cutReady=0;
+const CUT_FILES=['leg','arm','neck','shoe','hand','torso','pelvis','head','pony','eye','eyec','mouthc','moutho','moutho2'];
+const CUT_SRC={pelvis:'pelvis_t'}; // bassin : teinte recalee sur le jean des jambes (tools/joints.py)
+const IMG={},IMG_D={},IN_={};let cutReady=0;
+function erodeMask(im,e){ // silhouette interieure : alpha erode de e px (le trait du parent reste visible par-dessus le membre)
+  const c=document.createElement('canvas'),W=c.width=im.width,H=c.height=im.height,g=c.getContext('2d');g.drawImage(im,0,0);
+  let d;try{d=g.getImageData(0,0,W,H);}catch(err){return im;}
+  const a=new Uint8Array(W*H),b=new Uint8Array(W*H);for(let i=0;i<W*H;i++)a[i]=d.data[i*4+3]>128;
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){let v=1;for(let t=-e;t<=e&&v;t++){const u=x+t;v=u>=0&&u<W&&a[y*W+u];}b[y*W+x]=v;}
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){let v=1;for(let t=-e;t<=e&&v;t++){const u=y+t;v=u>=0&&u<H&&b[u*W+x];}const i=(y*W+x)*4;d.data[i]=d.data[i+1]=d.data[i+2]=255;d.data[i+3]=v?255:0;}
+  g.putImageData(d,0,0);return c;
+}
 CUT_FILES.forEach(n=>{const im=new Image();im.onload=()=>{
   // version assombrie pour les membres arriere (calculee une fois)
   const c=document.createElement('canvas');c.width=im.width;c.height=im.height;const g=c.getContext('2d');
   g.drawImage(im,0,0);g.globalCompositeOperation='source-atop';g.fillStyle='rgba(18,12,48,0.42)';g.fillRect(0,0,c.width,c.height);
-  IMG_D[n]=c;cutReady++;};im.src='assets/cutout/'+n+'.png';IMG[n]=im;});
+  IMG_D[n]=c;if(n==='torso'||n==='pelvis')IN_[n]=erodeMask(im,5);cutReady++;};im.src='assets/cutout/'+(CUT_SRC[n]||n)+'.png';IMG[n]=im;});
 const cutOK=()=>cutReady===CUT_FILES.length;
 const im_=(n,far)=>far?IMG_D[n]:IMG[n];
 
@@ -550,27 +559,83 @@ function handImg(a,far){
   const S=CUT.hand,k=S.mpp*SC,sa=P2(a.el),sb=P2(a.hand),th=Math.atan2(sb[1]-sa[1],sb[0]-sa[0]);
   ctx.save();ctx.translate(sb[0],sb[1]);ctx.rotate(th);ctx.scale(k,k);ctx.drawImage(im_('hand',far),-S.wrist[0],-S.wrist[1]);ctx.restore();
 }
-function drawArmCut(a,far){
-  handImg(a,far);
-  limbImg('farm',a.el,a.hand,far);
-  limbImg('uarm',a.sh,a.el,far);
+/* Membre sans jointure visible : une seule bande texturee pliee autour de l articulation centrale.
+   Hors de la zone de pli, chaque partie est rigide sur son os ; dans la zone (+-hw autour du pivot), des tranches fines
+   tournent autour du pivot d un angle interpole (skinning 2D a poids lisses) : le tissu se courbe au lieu de se casser.
+   Le tout est compose hors ecran puis entoure d UN contour (dilatation de la silhouette de l union), efface pres du pivot
+   proximal (epaule, hanche) pour que le membre sorte du corps sans liseré. */
+function bendStrip(g,n,sa,sj,sb,k){ // points en px du calque, k = px calque par px image
+  const P=CUT[n],img=IMG[n];
+  const t1=Math.atan2(sj[1]-sa[1],sj[0]-sa[0]);
+  let dT=Math.atan2(sb[1]-sj[1],sb[0]-sj[0])-t1;dT-=TAU*Math.round(dT/TAU);
+  const H0=img.height,ov=2.5;
+  const seg=(y0,y1,th)=>{y0=Math.max(0,y0);y1=Math.min(H0,y1);if(y1<=y0)return;
+    g.setTransform(1,0,0,1,0,0);g.translate(sj[0],sj[1]);g.rotate(th-Math.PI/2);g.scale(k,k);
+    g.drawImage(img,0,y0,img.width,y1-y0,-P.cx,y0-P.J,img.width,y1-y0);};
+  seg(0,P.J-P.hw+ov,t1);seg(P.J+P.hw-ov,H0,t1+dT);
+  const N=Math.max(3,Math.ceil(Math.abs(dT)*26));
+  for(let i=0;i<N;i++){const d0=-P.hw+2*P.hw*i/N,d1=d0+2*P.hw/N,u=(i+0.5)/N,w=u*u*(3-2*u);seg(P.J+d0-ov,P.J+d1+ov,t1+dT*w);}
+  g.setTransform(1,0,0,1,0,0);
 }
-function drawLegCut(l,far){
-  footImg(l,far);
-  limbImg('shin',l.knee,l.ank,far);
-  limbImg('thigh',l.hip,l.knee,far);
+const LAYF=document.createElement('canvas'),LAYO=document.createElement('canvas');
+const OUTN=8,OUTW=1.05; // epaisseur du contour redessine (px css), calee sur le trait des pieces imprimees
+const LAYM=document.createElement('canvas');
+function limbLayer(n,a,j,b,far,prox,par){
+  // par = silhouette interieure du parent (torse pour le bras, bassin pour la jambe) et sa transformation ecran
+  const P=CUT[n],k=SC/P.s,pts=[P2(a),P2(j),P2(b)],m=(P.rA+4)*k+OUTW+2;
+  const x0=Math.floor(Math.min(pts[0][0],pts[1][0],pts[2][0])-m),y0=Math.floor(Math.min(pts[0][1],pts[1][1],pts[2][1])-m);
+  const x1=Math.ceil(Math.max(pts[0][0],pts[1][0],pts[2][0])+m),y1=Math.ceil(Math.max(pts[0][1],pts[1][1],pts[2][1])+m);
+  const bw=x1-x0,bh=y1-y0,dw=Math.ceil(bw*DPR),dh=Math.ceil(bh*DPR);
+  for(const c of [LAYF,LAYO,LAYM]){if(c.width<dw)c.width=dw;if(c.height<dh)c.height=dh;}
+  const f=LAYF.getContext('2d'),o=LAYO.getContext('2d'),q=LAYM.getContext('2d');
+  f.setTransform(1,0,0,1,0,0);f.clearRect(0,0,dw+2,dh+2);
+  const sh=p=>[(p[0]-x0)*DPR,(p[1]-y0)*DPR],c=sh(pts[0]);
+  bendStrip(f,n,c,sh(pts[1]),sh(pts[2]),k*DPR);
+  if(far){f.globalCompositeOperation='source-atop';f.fillStyle='rgba(18,12,48,0.42)';f.fillRect(0,0,dw,dh);f.globalCompositeOperation='source-over';}
+  const parent=g=>{g.setTransform(DPR,0,0,DPR,-x0*DPR,-y0*DPR);g.translate(par.x,par.y);g.rotate(par.r);g.scale(par.k,par.k);g.drawImage(par.m,-par.ox,-par.oy);g.setTransform(1,0,0,1,0,0);};
+  if(par){ // la calotte proximale ne deborde jamais du corps : demi-disque cote corps, hors silhouette du parent, efface
+    const t1=Math.atan2(pts[1][1]-pts[0][1],pts[1][0]-pts[0][0]),rc=(P.rA+8)*k*DPR;
+    q.setTransform(1,0,0,1,0,0);q.clearRect(0,0,dw+2,dh+2);q.globalCompositeOperation='source-over';q.fillStyle='#000';
+    q.beginPath();q.arc(c[0],c[1],rc,t1+Math.PI/2,t1+Math.PI*1.5);q.closePath();q.fill();
+    q.globalCompositeOperation='destination-out';parent(q);q.globalCompositeOperation='source-over';
+    f.globalCompositeOperation='destination-out';f.drawImage(LAYM,0,0,dw,dh,0,0,dw,dh);f.globalCompositeOperation='source-over';
+  }
+  // contour : silhouette de l union dilatee (12 directions), teintee a l encre de la piece
+  o.setTransform(1,0,0,1,0,0);o.clearRect(0,0,dw+2,dh+2);
+  const r=OUTW*DPR;
+  for(let i=0;i<OUTN;i++){const t=i/OUTN*TAU;o.drawImage(LAYF,0,0,dw,dh,Math.cos(t)*r,Math.sin(t)*r,dw,dh);}
+  o.globalCompositeOperation='source-in';o.fillStyle=P.ink;o.fillRect(0,0,dw,dh);
+  if(prox){ // pas de contour la ou le membre sort du corps : effacement radial autour du pivot proximal (dans le corps seulement)
+    const R=P.rA*k*DPR*prox,gr=q.createRadialGradient(c[0],c[1],R*0.62,c[0],c[1],R);
+    gr.addColorStop(0,'rgba(0,0,0,1)');gr.addColorStop(1,'rgba(0,0,0,0)');
+    q.setTransform(1,0,0,1,0,0);q.clearRect(0,0,dw+2,dh+2);q.globalCompositeOperation='source-over';q.fillStyle=gr;q.fillRect(0,0,dw,dh);
+    if(par){q.globalCompositeOperation='destination-in';parent(q);q.globalCompositeOperation='source-over';}
+    o.globalCompositeOperation='destination-out';o.drawImage(LAYM,0,0,dw,dh,0,0,dw,dh);
+  }
+  o.globalCompositeOperation='source-over';
+  ctx.drawImage(LAYO,0,0,dw,dh,x0,y0,dw/DPR,dh/DPR);
+  ctx.drawImage(LAYF,0,0,dw,dh,x0,y0,dw/DPR,dh/DPR);
 }
+function drawArmCut(a,far,P){
+  handImg(a,far);                       // la main passe sous le poignet de la manche
+  limbLayer('arm',a.sh,a.el,a.hand,far,2.3,far?null:torsoXf(P,true));
+}
+function drawLegCut(l,far,P){
+  footImg(l,far);                       // la chaussure passe sous l ourlet du jean
+  limbLayer('leg',l.hip,l.knee,l.ank,far,1.3,far?null:pelvisXf(P,true));
+}
+// transformations ecran du bassin et du torse (partagees par le dessin et par les masques des membres)
+function pelvisXf(P,inner){const pv=CUT.pelvis,ph=P2(P.hip);return {x:ph[0],y:ph[1],r:P.l1*0.8,k:pv.mpp*SC,m:inner?IN_.pelvis:IMG.pelvis,ox:pv.hip[0],oy:pv.hip[1]};}
+function torsoXf(P,inner){const T=CUT.torso,sn=P2(P.neck),sh=P2(P.hip),th=Math.atan2(sn[1]-sh[1],sn[0]-sh[0]);
+  const ia=Math.atan2(T.top[1]-T.bot[1],T.top[0]-T.bot[0]);return {x:sn[0],y:sn[1],r:th-ia,k:T.mpp*SC,m:inner?IN_.torso:IMG.torso,ox:T.top[0],oy:T.top[1]};}
+const drawXf=X=>{ctx.save();ctx.translate(X.x,X.y);ctx.rotate(X.r);ctx.scale(X.k,X.k);ctx.drawImage(X.m,-X.ox,-X.oy);ctx.restore();};
+function drawPelvisCut(s,P){drawXf(pelvisXf(P,false));}
 function drawTorsoCut(s,P){
-  // bassin
-  const pv=CUT.pelvis,ph=P2(P.hip);
-  ctx.save();ctx.translate(ph[0],ph[1]);ctx.rotate(P.l1*0.8);ctx.scale(pv.mpp*SC,pv.mpp*SC);ctx.drawImage(IMG.pelvis,-pv.hip[0],-pv.hip[1]);ctx.restore();
   // cou : de la base de la tete vers le point cou
   const hb=[P.head[0]-(HEAD*0.55)*P.u[0]-0.03*P.f[0],P.head[1]-(HEAD*0.55)*P.u[1]-0.03*P.f[1]];
   limbImg('neck',hb,[P.neck[0]-0.02*Math.sin(P.l2),P.neck[1]-0.02*Math.cos(P.l2)],false);
   // torse rigide : col sur le point cou, axe hanche -> cou
-  const T=CUT.torso,sn=P2(P.neck),sh=P2(P.hip),th=Math.atan2(sn[1]-sh[1],sn[0]-sh[0]);
-  const ia=Math.atan2(T.top[1]-T.bot[1],T.top[0]-T.bot[0]);
-  ctx.save();ctx.translate(sn[0],sn[1]);ctx.rotate(th-ia);ctx.scale(T.mpp*SC,T.mpp*SC);ctx.drawImage(IMG.torso,-T.top[0],-T.top[1]);ctx.restore();
+  drawXf(torsoXf(P,false));
 }
 function drawHeadCut(s,P){
   const Hd=CUT.head,k=Hd.mpp*SC,c=P2(P.head);
@@ -591,8 +656,10 @@ function drawHeadCut(s,P){
   ctx.restore();
 }
 function drawCharacterCut(s,P){
-  drawArmCut(P.arms[1],true);drawLegCut(P.legs[1],true);
-  drawLegCut(P.legs[0],false);drawTorsoCut(s,P);drawHeadCut(s,P);drawArmCut(P.arms[0],false);
+  // arriere-plan : bras et jambe du fond (assombris), puis bassin ; la jambe avant passe PAR-DESSUS le bassin
+  // (sa calotte de hanche fondue dans le jean), puis cou, veste (son ourlet couvre la ceinture), tete, bras avant
+  drawArmCut(P.arms[1],true,P);drawLegCut(P.legs[1],true,P);
+  drawPelvisCut(s,P);drawLegCut(P.legs[0],false,P);drawTorsoCut(s,P);drawHeadCut(s,P);drawArmCut(P.arms[0],false,P);
 }
 
 function render(s){
