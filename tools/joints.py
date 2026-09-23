@@ -4,6 +4,7 @@
 # - teinte du segment distal recalee sur le segment proximal (et bassin recale sur la cuisse)
 # - largeur raccordee au pivot central (effilement lineaire), fondu enchaine sur une bande autour du pivot
 # - calotte proximale adoucie (alpha) : elle disparait sous le bassin / l epaule
+# - jambe : ourlet plat en biais, bas legerement evase (au lieu d un bout de tube arrondi)
 import numpy as np, json, sys
 from PIL import Image
 from scipy import ndimage as ndi
@@ -77,6 +78,16 @@ sh=retint(sh,th); pv2=retint(pv,th); fa=retint(fa,to,True); ua=retint(ua,to,True
 th,sh,ua,fa=defill(th,6.5),defill(sh,6),defill(ua,6),defill(fa,6)
 leg,ML=strip(th,sh,((43,43),(43,268)),((34.5,35.5),(34,275)),L1,L2,500)
 arm,MA=strip(ua,fa,((46,43),(45,267)),((44,44),(41.5,274.5)),UA,FA,760,band=12,fext=0.35)
+def hem(im,M,drop=5.0,slope=0.18,flare=1.1,band=40):
+    # ourlet du jean : le bas n est plus un tube arrondi mais une coupe droite, un peu en biais (plus longue au
+    # talon, cote -x de la bande) et legerement evasee sur les `band` px au-dessus
+    im=im.astype(np.float32); H,W=im.shape[:2]; cx,B=M['cx'],M['B']
+    Y,X=np.mgrid[0:H,0:W].astype(np.float32)
+    f=1+(flare-1)*np.clip((Y-(B-band))/band,0,1)**2
+    xs=cx+(X-cx)/f; out=np.stack([ndi.map_coordinates(im[...,c],[Y,xs],order=1,mode='constant') for c in range(4)],-1)
+    yh=B+drop-slope*(X-cx); out[...,3]*=np.clip(yh-Y+0.5,0,1)
+    return out.clip(0,255).astype(np.uint8)
+leg=hem(leg,ML)
 Image.fromarray(leg).save(D+'leg.png'); Image.fromarray(arm).save(D+'arm.png')
 Image.fromarray(pv2.clip(0,255).astype(np.uint8)).save(D+'pelvis_t.png')
 print(json.dumps({'leg':ML,'arm':MA},default=lambda v:round(float(v),1)))

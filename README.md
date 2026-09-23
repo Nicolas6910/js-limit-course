@@ -14,14 +14,24 @@ Cycle de marche puis course d'un personnage 2D en canvas 2D, rig entierement pro
 Une image PNG detouree par segment, dans `assets/cutout/` : tete, cou, torse (veste), bassin, cuisse, tibia (jean),
 chaussure (coupee en deux au pli metatarsien pour le deroule), bras, avant-bras, main, queue de cheval, et pour le visage
 oeil ouvert, paupiere fermee, bouche fermee / entrouverte / grande ouverte (clignement et halètement pendant la recuperation).
-Articulations invisibles : cuisse+tibia et bras+avant-bras ne sont plus deux pieces mais une seule bande continue
-par membre (`leg.png`, `arm.png`, construites par `tools/joints.py` a partir des pieces d origine : contour sombre retire,
-teinte du segment distal recalee sur le proximal, largeurs raccordees au genou/coude, fondu sur la jointure).
-Au rendu, la bande est pliee autour du genou/coude par un skinning 2D (tranches fines tournant d un angle interpole
-autour du pivot) : le tissu se courbe au lieu de se casser. Chaque membre est compose hors ecran puis entoure d un
-seul contour (dilatation de la silhouette de l union), efface pres de l epaule et de la hanche ; la calotte de hanche/epaule
-est fondue en alpha et rognee a la silhouette interieure du bassin/torse pour ne jamais deborder. Ordre : bras et
-jambe du fond (assombris), bassin, jambe avant, cou, veste, tete, bras avant.
+Un seul bloc : cou, buste et bassin ne sont plus des pieces separees mais une image de corps pre-composee
+(`body.png`, `tools/body.py` : veste + jean poses dans la pose de repos du rig, contour d encre retire puis un contour
+unique redessine autour de la silhouette entiere ; seuls restent les bords de vetement, ourlet de la veste sur le jean).
+Le rig laisse le buste glisser (+-4,6 cm) et tourner (-9,5 a +6 deg) sur le bassin : le rendu habille le fige, le
+corps est rigide sur l axe hanche -> cou et seule une legere rotation du bassin est gardee, bornee en douceur a +-4 deg
+(tranches interpolees a la taille, autour du pivot de hanche). Tout le reste pivote sur des axes fixes du corps : les deux
+jambes sur un pivot de hanche unique (re-resolues par IK depuis ce pivot, les pieds d appui gardent exactement leur
+position), les bras sur des epaules fixes, la tete sur le bord haut du col. Le cou appartient a la tete (`head_b.png` :
+moignon prolonge par la piece cou, recale en teinte) et entre dans le col ; la veste seule (`body_top.png`) est
+redessinee par-dessus la racine de la cuisse avant et la base du cou, si bien qu aucun pivot n est visible.
+
+Membres : cuisse+tibia et bras+avant-bras sont une seule bande continue par membre (`leg.png`, `arm.png`, `tools/joints.py`),
+pliee au genou/coude par skinning 2D (tranches fines tournant d un angle interpole autour du pivot), avec un conge
+texture dans le creux du pli (plus de V a l arriere du genou ni au pli du coude) et un ourlet de jean plat en biais.
+Chaque membre est compose hors ecran puis entoure d un seul contour (dilatation de la silhouette) ; le contour de la
+jambe avant s efface dans tout le jean du corps (cuisse et bassin ne font qu un), celui du bras avant pres de l epaule.
+Ordre : bras et jambe du fond (assombris, racine opaque), corps, jambe avant, tete, veste, queue de cheval, bras avant.
+Degrades plein ecran du decor (ciel, halo de lune, vignette) rasterises une fois par taille d ecran.
 
 Images generees avec Agnes (`agnes-image-2.5-flash`), une piece par prompt avec un prefixe de style commun
 (« paper craft cut-out puppet part … solid chroma green background ») et des couleurs fixees
