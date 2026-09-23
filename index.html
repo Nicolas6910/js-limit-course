@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Marche → Course · rig procédural</title>
+<title>Marche → Course · rig procédural habillé en cut-out</title>
 <style>
 html,body{margin:0;height:100%;background:#070a1a;overflow:hidden;font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#e8ecff}
 canvas{display:block;width:100vw;height:100vh}
@@ -21,7 +21,7 @@ button.on{border-color:#34e3c3;color:#6ff7dc}
 </head>
 <body>
 <canvas id="c"></canvas>
-<div class="hud"><h1>Marche → Course</h1><div class="sub">Rig 2D procédural · IK deux os · pieds ancrés au sol · ressorts secondaires</div><div class="phase" id="ph">Repos</div></div>
+<div class="hud"><h1>Marche → Course</h1><div class="sub">Rig 2D procédural · habillage cut-out (une image par segment) · IK deux os · pieds ancrés · S = squelette</div><div class="phase" id="ph">Repos</div></div>
 <div class="ctrl"><button id="bSk" title="Touche S">Squelette</button><button id="bRe">↻ Rejouer</button></div>
 <div class="bar"><i id="pb"></i></div>
 <script>
@@ -498,13 +498,113 @@ function drawSkeleton(s,P){
   ctx.restore();
 }
 
+/* ---------- habillage cut-out : une image par segment ---------- */
+// Pivots en pixels image. Pour les membres : p0 = articulation proximale, p1 = distale (axe image vertical).
+// L = longueur rig (m), wk = facteur de largeur constant (calibre une fois, jamais anime).
+const CUT={
+  thigh:{p0:[43,43],p1:[43,268],L:L1,wk:1},
+  shin:{p0:[34.5,35.5],p1:[34,275],L:L2,wk:1},
+  uarm:{p0:[46,43],p1:[45,267],L:UA,wk:1},
+  farm:{p0:[44,44],p1:[41.5,274.5],L:FA,wk:1},
+  neck:{p0:[39.5,39.5],p1:[40,121],L:0.12,wk:0.75},
+  shoe:{sole:173,heel:2,mpp:0.00092},                // ligne de semelle et talon (px), metres/pixel
+  hand:{wrist:[14,94],mpp:0.0007},
+  torso:{top:[95,40],bot:[75,395],mpp:0.00152},      // col -> point cou du rig, ourlet -> hanche-0.04
+  pelvis:{hip:[150,138],mpp:0.00104},
+  head:{c:[228,160],mpp:0.00109,tie:[98,58],eye:[318,160],mouth:[340,238]},
+  pony:{tie:[18,22],tip:[92,250],mpp:0.00112},
+  eye:{mpp:0.00030},mouth:{mpp:0.00032}
+};
+const CUT_FILES=['thigh','shin','uarm','farm','neck','shoe','hand','torso','pelvis','head','pony','eye','eyec','mouthc','moutho','moutho2'];
+const IMG={},IMG_D={};let cutReady=0;
+CUT_FILES.forEach(n=>{const im=new Image();im.onload=()=>{
+  // version assombrie pour les membres arriere (calculee une fois)
+  const c=document.createElement('canvas');c.width=im.width;c.height=im.height;const g=c.getContext('2d');
+  g.drawImage(im,0,0);g.globalCompositeOperation='source-atop';g.fillStyle='rgba(18,12,48,0.42)';g.fillRect(0,0,c.width,c.height);
+  IMG_D[n]=c;cutReady++;};im.src='assets/cutout/'+n+'.png';IMG[n]=im;});
+const cutOK=()=>cutReady===CUT_FILES.length;
+const im_=(n,far)=>far?IMG_D[n]:IMG[n];
+
+function limbImg(n,a,b,far){ // segment rigide de a (proximal) vers b (distal), coordonnees monde
+  const P=CUT[n],sa=P2(a),sb=P2(b),th=Math.atan2(sb[1]-sa[1],sb[0]-sa[0]);
+  const k=P.L*SC/(P.p1[1]-P.p0[1]);
+  ctx.save();ctx.translate(sa[0],sa[1]);ctx.rotate(th-Math.PI/2);ctx.scale(k*P.wk,k);
+  ctx.drawImage(im_(n,far),-P.p0[0],-P.p0[1]);ctx.restore();
+}
+function footImg(l,far){
+  // pivots derives du rig : cheville a (0,0), semelle a y=-ANK, pli metatarsien a x=0.13 (point de roulement d ankleFrom)
+  const S=CUT.shoe,k=S.mpp*SC,img=im_('shoe',far);
+  const ax=S.heel+0.072/S.mpp,ay=S.sole-ANK/S.mpp,bx=ax+0.13/S.mpp,by=S.sole,H0=img.height;
+  const w=(x,y,ang)=>{const v=rot(x,y,ang);return [l.ank[0]+v[0],l.ank[1]+v[1]];};
+  const ballW=w(0.13,-ANK,l.ang),ta=l.flat?0:l.ang*0.7;
+  // pointe : pivote autour du point de semelle sous le pli, dessinee dessous, recouvrement de 16 px
+  const pb=P2(ballW);
+  ctx.save();ctx.translate(pb[0],pb[1]);ctx.rotate(-ta);ctx.scale(k,k);
+  ctx.beginPath();ctx.rect(-16,-by-2,img.width,H0+4);ctx.clip();ctx.drawImage(img,-bx,-by);ctx.restore();
+  // talon + corps de la chaussure, rigide autour de la cheville
+  const pa=P2(l.ank);
+  ctx.save();ctx.translate(pa[0],pa[1]);ctx.rotate(-l.ang);ctx.scale(k,k);
+  ctx.beginPath();ctx.rect(-ax-2,-ay-2,bx+2,H0+4);ctx.clip();ctx.drawImage(img,-ax,-ay);ctx.restore();
+}
+function handImg(a,far){
+  const S=CUT.hand,k=S.mpp*SC,sa=P2(a.el),sb=P2(a.hand),th=Math.atan2(sb[1]-sa[1],sb[0]-sa[0]);
+  ctx.save();ctx.translate(sb[0],sb[1]);ctx.rotate(th);ctx.scale(k,k);ctx.drawImage(im_('hand',far),-S.wrist[0],-S.wrist[1]);ctx.restore();
+}
+function drawArmCut(a,far){
+  handImg(a,far);
+  limbImg('farm',a.el,a.hand,far);
+  limbImg('uarm',a.sh,a.el,far);
+}
+function drawLegCut(l,far){
+  footImg(l,far);
+  limbImg('shin',l.knee,l.ank,far);
+  limbImg('thigh',l.hip,l.knee,far);
+}
+function drawTorsoCut(s,P){
+  // bassin
+  const pv=CUT.pelvis,ph=P2(P.hip);
+  ctx.save();ctx.translate(ph[0],ph[1]);ctx.rotate(P.l1*0.8);ctx.scale(pv.mpp*SC,pv.mpp*SC);ctx.drawImage(IMG.pelvis,-pv.hip[0],-pv.hip[1]);ctx.restore();
+  // cou : de la base de la tete vers le point cou
+  const hb=[P.head[0]-(HEAD*0.55)*P.u[0]-0.03*P.f[0],P.head[1]-(HEAD*0.55)*P.u[1]-0.03*P.f[1]];
+  limbImg('neck',hb,[P.neck[0]-0.02*Math.sin(P.l2),P.neck[1]-0.02*Math.cos(P.l2)],false);
+  // torse rigide : col sur le point cou, axe hanche -> cou
+  const T=CUT.torso,sn=P2(P.neck),sh=P2(P.hip),th=Math.atan2(sn[1]-sh[1],sn[0]-sh[0]);
+  const ia=Math.atan2(T.top[1]-T.bot[1],T.top[0]-T.bot[0]);
+  ctx.save();ctx.translate(sn[0],sn[1]);ctx.rotate(th-ia);ctx.scale(T.mpp*SC,T.mpp*SC);ctx.drawImage(IMG.torso,-T.top[0],-T.top[1]);ctx.restore();
+}
+function drawHeadCut(s,P){
+  const Hd=CUT.head,k=Hd.mpp*SC,c=P2(P.head);
+  ctx.save();ctx.translate(c[0],c[1]);ctx.rotate(P.ha);ctx.scale(k,k);ctx.translate(-Hd.c[0],-Hd.c[1]);
+  ctx.drawImage(IMG.head,0,0);
+  // oeil : ouvert / paupiere fermee
+  const bl=(fract(s.t/3.7)<0.035||fract((s.t+1.3)/5.1)<0.03||(pantW(s.t)>0.3&&fract(s.t/1.9)<0.06));
+  const ei=bl?IMG.eyec:IMG.eye,es=CUT.eye.mpp/Hd.mpp;
+  ctx.drawImage(ei,Hd.eye[0]-ei.width*es*0.5,Hd.eye[1]-ei.height*es*0.55,ei.width*es,ei.height*es);
+  // bouche : trois pieces, essoufflement
+  const pw=pantW(s.t)+0.6*s.r,o=pw*(0.6+0.4*Math.sin(s.t*TAU*1.55));
+  const mi=o<0.22?IMG.mouthc:o<0.62?IMG.moutho2:IMG.moutho,ms=CUT.mouth.mpp/Hd.mpp;
+  ctx.drawImage(mi,Hd.mouth[0]-mi.width*ms*0.62,Hd.mouth[1]-mi.height*ms*0.5,mi.width*ms,mi.height*ms);
+  // queue de cheval : piece rigide orientee par la chaine Verlet
+  const q0=s.pony[0],q3=s.pony[4],dir=Math.atan2(-(q3.y-q0.y),q3.x-q0.x)-P.ha; // angle ecran, repere tete
+  const Po=CUT.pony,ps=Po.mpp/Hd.mpp,pa=Math.atan2(Po.tip[1]-Po.tie[1],Po.tip[0]-Po.tie[0]);
+  ctx.translate(Hd.tie[0],Hd.tie[1]);ctx.rotate(dir-pa);ctx.scale(ps,ps);ctx.drawImage(IMG.pony,-Po.tie[0],-Po.tie[1]);
+  ctx.restore();
+}
+function drawCharacterCut(s,P){
+  drawArmCut(P.arms[1],true);drawLegCut(P.legs[1],true);
+  drawLegCut(P.legs[0],false);drawTorsoCut(s,P);drawHeadCut(s,P);drawArmCut(P.arms[0],false);
+}
+
 function render(s){
   const t=s.t;cam=s.camX;
   drawSky(t);drawCity(t);lamps(t,false);drawStreet(t);
   const P=pose(s);
   drawShadow(P);drawDust(s);
-  drawArm(P.arms[1],false);drawLeg(P.legs[1],false);
-  drawBody(s,P);drawLeg(P.legs[0],true);drawTorso(s,P);drawHead(s,P);drawArm(P.arms[0],true);
+  if(!showSk&&cutOK()) drawCharacterCut(s,P);
+  else{ // version non habillee (procedurale) : mode Squelette, ou images pas encore chargees
+    drawArm(P.arms[1],false);drawLeg(P.legs[1],false);
+    drawBody(s,P);drawLeg(P.legs[0],true);drawTorso(s,P);drawHead(s,P);drawArm(P.arms[0],true);
+  }
   if(showSk)drawSkeleton(s,P);
   foreground(t);
   // vignette
@@ -531,6 +631,8 @@ const bSk=document.getElementById('bSk');
 const togg=()=>{showSk=!showSk;bSk.classList.toggle('on',showSk);};
 bSk.onclick=togg;addEventListener('keydown',e=>{if(e.key==='s'||e.key==='S')togg();});
 window.__seek=(t,sk)=>{manualT=t;if(sk!==undefined)showSk=sk;};
+// ?t=5.2 fige le temps (captures), ?sk=1 force le squelette
+{const q=new URLSearchParams(location.search);if(q.has('t'))manualT=clamp(parseFloat(q.get('t'))||0,0,DUR-1e-3);if(q.get('sk')==='1'){showSk=true;bSk.classList.add('on');}}
 requestAnimationFrame(frame);
 </script>
 </body>
