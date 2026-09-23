@@ -30,7 +30,7 @@ Touche S ou bouton « Squelette » : version non habillee (rendu procedural d'or
 ![course](course.png)
 ![recuperation](recuperation.png)
 
-Rendu procedural d'origine (mode Squelette sans le rig) :
+Rendu procedural d origine, avant habillage (toujours visible via le mode Squelette) :
 
 ![marche](walk.png)
 ![course procedurale](run.png)
